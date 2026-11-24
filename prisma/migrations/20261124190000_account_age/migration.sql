@@ -1,0 +1,1 @@
+ALTER TABLE "Mailbox" ADD COLUMN "oldMessages" INTEGER, ADD COLUMN "ageCheckedAt" TIMESTAMPTZ(3);

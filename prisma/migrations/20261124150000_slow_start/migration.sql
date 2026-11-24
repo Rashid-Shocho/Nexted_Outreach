@@ -1,0 +1,1 @@
+ALTER TABLE "Campaign" ADD COLUMN "slowStart" BOOLEAN NOT NULL DEFAULT true;

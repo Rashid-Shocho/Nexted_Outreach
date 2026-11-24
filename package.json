@@ -1,0 +1,57 @@
+{
+  "name": "nexted-outreach",
+  "version": "0.1.0",
+  "private": true,
+  "description": "nextED Outreach - staff tool: student Gmail accounts, CVs, professor lists, scheduled emails and one shared inbox.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "db:start": "tsx scripts/dev-db.ts",
+    "update": "npm install --no-audit --no-fund --ignore-scripts && prisma migrate deploy && prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:generate": "prisma generate",
+    "db:seed": "tsx scripts/seed.ts",
+    "check:ai": "tsx scripts/check-ai.ts",
+    "demo:clear": "tsx scripts/demo-clear.ts",
+    "fake:reply": "tsx scripts/fake-reply.ts",
+    "staff:add": "tsx scripts/staff-add.ts",
+    "gen:key": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"",
+    "predev": "node scripts/ready.mjs",
+    "preworker": "node scripts/ready.mjs",
+    "dev": "next dev -p 3400",
+    "build": "next build",
+    "postinstall": "prisma generate",
+    "start": "next start -p 3400",
+    "worker": "tsx src/worker/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/unit/*.test.ts",
+    "test:db": "tsx --test --test-concurrency=1 tests/db/*.test.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "dotenv": "^18.0.10",
+    "exceljs": "^4.4.0",
+    "luxon": "^3.7.2",
+    "next": "^15.5.29",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "server-only": "^0.0.1",
+    "unpdf": "^2.2.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.7.6",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "embedded-postgres": "^18.7.0-beta.19",
+    "prisma": "^6.19.3",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "postcss": "^8.5.32",
+    "uuid": "^11.1.1"
+  }
+}

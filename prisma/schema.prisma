@@ -1,0 +1,433 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- staff (one user type)
+
+model Staff {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  active       Boolean   @default(true)
+  failedLogins Int       @default(0)
+  lockedUntil  DateTime? @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  sessions     Session[]
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  staffId   String
+  staff     Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  expiresAt DateTime @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actor     String
+  action    String
+  entity    String
+  entityId  String?
+  data      Json?
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+}
+
+// ---------------------------------------------------------------- students
+
+model Student {
+  id        String           @id @default(uuid())
+  fullName  String
+  /// The student's own Gmail, lower case. Only this account may be connected.
+  email     String           @unique
+  /// Shown in the contact line of every email
+  phone     String?
+  /// Lines under the name: position, department, institution
+  signature String?
+  /// Written by staff: the only source of facts about the student in the emails
+  notes     String?
+  /// Demo students may be processed on a free AI tier; real students may not.
+  isDemo    Boolean          @default(false)
+  consentAt DateTime?        @db.Timestamptz(3)
+  consentBy String?
+  createdAt DateTime         @default(now()) @db.Timestamptz(3)
+  mailbox   Mailbox?
+  cvs       Cv[]
+  profiles  StudentProfile[]
+  lists     ProfessorList[]
+  campaigns Campaign[]
+  emails    Email[]
+  threads   Thread[]
+  messages  Message[]
+}
+
+enum MailboxStatus {
+  CONNECTED
+  RECONNECT
+}
+
+model Mailbox {
+  id                    String        @id @default(uuid())
+  studentId             String        @unique
+  student               Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  email                 String        @unique
+  encryptedRefreshToken String
+  encryptedAccessToken  String?
+  accessTokenExpiresAt  DateTime?     @db.Timestamptz(3)
+  status                MailboxStatus @default(CONNECTED)
+  lastError             String?
+  /// Gmail asked us to slow down: no sending from this mailbox until then
+  sendPausedUntil       DateTime?     @db.Timestamptz(3)
+  historyId             String?
+  lastSyncAt            DateTime?     @db.Timestamptz(3)
+  nextSyncAt            DateTime      @default(now()) @db.Timestamptz(3)
+  syncClaimedAt         DateTime?     @db.Timestamptz(3)
+  connectedAt           DateTime      @default(now()) @db.Timestamptz(3)
+  /// Messages older than 30 days, counted up to 20: shows whether the account is in normal use
+  oldMessages           Int?
+  ageCheckedAt          DateTime?     @db.Timestamptz(3)
+
+  @@index([status, nextSyncAt])
+}
+
+/// A private link a student opens on their own phone to connect their Gmail.
+model ConnectLink {
+  id        String    @id @default(uuid())
+  tokenHash String    @unique
+  studentId String
+  createdBy String
+  expiresAt DateTime  @db.Timestamptz(3)
+  usedAt    DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+}
+
+model OAuthState {
+  stateHash String   @id
+  studentId String
+  /// Who started it: a staff member, or the browser that opened a connection link
+  staffId   String?
+  nonceHash String?
+  linkId    String?
+  expiresAt DateTime @db.Timestamptz(3)
+}
+
+/// The CV is only attached to the drafts; the system never reads it.
+model Cv {
+  id        String     @id @default(uuid())
+  studentId String
+  student   Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  version   Int
+  fileName  String
+  mimeType  String
+  sizeBytes Int
+  sha256    String
+  content   Bytes
+  createdAt DateTime   @default(now()) @db.Timestamptz(3)
+  campaigns Campaign[]
+
+  @@unique([studentId, version])
+}
+
+enum ProfileStatus {
+  PENDING
+  RUNNING
+  READY
+  FAILED
+}
+
+/// The student's academic profile (PDF). Read once into a brief; the emails take their facts from it.
+model StudentProfile {
+  id        String        @id @default(uuid())
+  studentId String
+  student   Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  version   Int
+  fileName  String
+  sizeBytes Int
+  content   Bytes
+  text      String
+  /// Facts of each finished batch
+  parts     Json          @default("[]")
+  /// The short version the writer gets; staff can correct it
+  brief     String?
+  status    ProfileStatus @default(PENDING)
+  attempts  Int           @default(0)
+  claimedAt DateTime?     @db.Timestamptz(3)
+  notBefore DateTime?     @db.Timestamptz(3)
+  error     String?
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+
+  @@unique([studentId, version])
+}
+
+enum ListStatus {
+  PREVIEW
+  IMPORTED
+}
+
+model ProfessorList {
+  id         String      @id @default(uuid())
+  studentId  String
+  student    Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  fileName   String
+  status     ListStatus  @default(PREVIEW)
+  headers    Json
+  rows       Json
+  mapping    Json
+  createdBy  String
+  createdAt  DateTime    @default(now()) @db.Timestamptz(3)
+  professors Professor[]
+  campaigns  Campaign[]
+}
+
+model Professor {
+  id           String        @id @default(uuid())
+  listId       String
+  list         ProfessorList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  rowNumber    Int
+  name         String
+  email        String
+  university   String?
+  department   String?
+  researchArea String?
+  country      String?
+  notes        String?
+  /// [{title, year, venue, doi}] from Crossref; null until looked up
+  papers       Json?
+  papersAt     DateTime?     @db.Timestamptz(3)
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+  mails        Email[]
+
+  @@unique([listId, email])
+  @@index([email])
+}
+
+// ---------------------------------------------------------------- campaigns
+
+enum CampaignStatus {
+  GENERATING
+  REVIEW
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model Campaign {
+  id           String         @id @default(uuid())
+  studentId    String
+  student      Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  listId       String
+  list         ProfessorList  @relation(fields: [listId], references: [id])
+  cvId         String
+  cv           Cv             @relation(fields: [cvId], references: [id])
+  name         String
+  status       CampaignStatus @default(GENERATING)
+  paused       Boolean        @default(false)
+  pauseReason  String?
+  intake       String?
+  instructions String?
+  startDate    String
+  windowStart  String         @default("19:30")
+  windowEnd    String         @default("20:30")
+  timezone     String         @default("Asia/Dhaka")
+  minPerDay    Int            @default(15)
+  maxPerDay    Int            @default(20)
+  /// ISO weekdays, 1 = Monday
+  weekdays     Int[]          @default([1, 2, 3, 4, 5])
+  skipped      Int            @default(0)
+  /// Each email is scheduled and put into Gmail as soon as it is written and passed the checks
+  autoSchedule Boolean        @default(true)
+  /// Real sending to the addresses of the list. Needs EMAIL_SANDBOX=false as well.
+  live         Boolean        @default(false)
+  /// Real sending begins with a few emails a day: a Gmail account that suddenly writes to many strangers is sent to Spam
+  slowStart    Boolean        @default(true)
+  createdBy    String
+  approvedBy   String?
+  approvedAt   DateTime?      @db.Timestamptz(3)
+  createdAt    DateTime       @default(now()) @db.Timestamptz(3)
+  emails       Email[]
+
+  @@index([studentId])
+}
+
+enum EmailStatus {
+  PENDING
+  GENERATING
+  GEN_FAILED
+  DRAFT
+  SCHEDULED
+  SENDING
+  SENT
+  BOUNCED
+  /// Sending stopped half way and Gmail could not tell us what happened. Never retried by itself.
+  UNCERTAIN
+  CANCELLED
+}
+
+model Email {
+  id             String      @id @default(uuid())
+  campaignId     String
+  campaign       Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  studentId      String
+  student        Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  professorId    String
+  professor      Professor   @relation(fields: [professorId], references: [id])
+  toEmail        String
+  subject        String      @default("")
+  body           String      @default("")
+  status         EmailStatus @default(PENDING)
+  fit            String?
+  fitNote        String?
+  /// [{code, level: "block" | "warn", text}]
+  flags          Json        @default("[]")
+  attempts       Int         @default(0)
+  claimToken     String?
+  claimedAt      DateTime?   @db.Timestamptz(3)
+  notBefore      DateTime?   @db.Timestamptz(3)
+  contentVersion Int         @default(1)
+  /// What the worker is doing with it right now
+  step           String?
+
+  scheduledFor   DateTime? @db.Timestamptz(3)
+  /// Test mode only: send at once, outside the window
+  sendNow        Boolean   @default(false)
+  gmailDraftId   String?
+  gmailThreadId  String?
+  gmailMessageId String?
+  /// What the Gmail draft was built from; differs from the current values when it must be updated
+  draftVersion   Int?
+  draftTo        String?
+  draftedAt      DateTime? @db.Timestamptz(3)
+  draftError     String?
+
+  sentAt    DateTime? @db.Timestamptz(3)
+  sentTo    String?
+  sandboxed Boolean?
+  repliedAt DateTime? @db.Timestamptz(3)
+  bouncedAt DateTime? @db.Timestamptz(3)
+  error     String?
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @db.Timestamptz(3)
+
+  /// A student contacts a professor's address once, ever.
+  @@unique([studentId, toEmail])
+  @@index([campaignId, status])
+  @@index([status, scheduledFor])
+  @@index([toEmail])
+  @@index([gmailThreadId])
+}
+
+// ---------------------------------------------------------------- inbox
+
+enum MessageKind {
+  PROFESSOR
+  AUTO_REPLY
+  BOUNCE
+  OTHER
+}
+
+model Thread {
+  id            String      @id @default(uuid())
+  studentId     String
+  student       Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  gmailThreadId String
+  subject       String
+  kind          MessageKind @default(OTHER)
+  emailId       String?
+  fromName      String?
+  fromEmail     String?
+  snippet       String?
+  hasIncoming   Boolean     @default(false)
+  unread        Boolean     @default(false)
+  lastMessageAt DateTime    @db.Timestamptz(3)
+  messages      Message[]
+
+  @@unique([studentId, gmailThreadId])
+  @@index([hasIncoming, kind, lastMessageAt])
+}
+
+model Message {
+  id              String      @id @default(uuid())
+  studentId       String
+  student         Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  threadId        String
+  thread          Thread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  gmailMessageId  String
+  outgoing        Boolean
+  kind            MessageKind @default(OTHER)
+  fromName        String?
+  fromEmail       String
+  toText          String
+  subject         String
+  snippet         String
+  body            String
+  messageIdHeader String?
+  /// [{name, mimeType, size, attachmentId}]
+  attachments     Json        @default("[]")
+  sentAt          DateTime    @db.Timestamptz(3)
+  createdAt       DateTime    @default(now()) @db.Timestamptz(3)
+
+  @@unique([studentId, gmailMessageId])
+  @@index([threadId, sentAt])
+  @@index([studentId, fromEmail])
+}
+
+/// A reply written by staff. clientKey makes a double click send once.
+model StaffReply {
+  id           String   @id @default(uuid())
+  clientKey    String   @unique
+  threadId     String
+  staffEmail   String
+  body         String
+  gmailDraftId String?
+  /// SENDING | SENT | FAILED | UNCERTAIN
+  status       String   @default("SENDING")
+  error        String?
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+}
+
+// ---------------------------------------------------------------- ops
+
+model ApiUsage {
+  id           String   @id @default(uuid())
+  provider     String
+  model        String
+  operation    String
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  success      Boolean  @default(true)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([createdAt])
+}
+
+/// EMAIL_TRANSPORT=fake: a pretend Gmail for development and tests. Never used in production.
+model FakeMail {
+  id        String   @id @default(uuid())
+  seq       Int      @default(autoincrement())
+  mailbox   String
+  threadId  String
+  draftId   String?  @unique
+  labels    String[]
+  headers   Json
+  body      String
+  files     Json     @default("[]")
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([mailbox, seq])
+}
